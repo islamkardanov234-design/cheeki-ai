@@ -8,14 +8,11 @@ const DEXSCREENER_API = `https://api.dexscreener.com/latest/dex/tokens/${CHEEKI_
 
 async function fetchCheekiPrice() {
   try {
-    const res = await fetch(DEXSCREENER_API, {
-      next: { revalidate: 30 }, // cache 30s
-    });
+    const res = await fetch(DEXSCREENER_API, { next: { revalidate: 30 } });
     if (!res.ok) return null;
     const data = await res.json();
     const pair = data?.pairs?.[0];
     if (!pair) return null;
-
     return {
       price_usd: pair.priceUsd ?? 'N/A',
       price_native: pair.priceNative ?? 'N/A',
@@ -29,8 +26,6 @@ async function fetchCheekiPrice() {
       price_change_24h: pair.priceChange?.h24 ?? 'N/A',
       txns_24h_buys: pair.txns?.h24?.buys ?? 'N/A',
       txns_24h_sells: pair.txns?.h24?.sells ?? 'N/A',
-      dex: pair.dexId ?? 'PancakeSwap',
-      pair_address: pair.pairAddress ?? 'N/A',
       chart_url: `https://dexscreener.com/bsc/${pair.pairAddress ?? CHEEKI_CONTRACT}`,
     };
   } catch {
@@ -41,10 +36,10 @@ async function fetchCheekiPrice() {
 export const cheekiTools = {
   search_knowledge: tool({
     description: 'Search the CHEEKI project knowledge base for specific information about the project, tokenomics, security, how to buy, links, FAQ, etc.',
-    parameters: z.object({
+    inputSchema: z.object({
       query: z.string().describe('The search query to find relevant knowledge'),
     }),
-    execute: async ({ query }) => {
+    execute: async ({ query }: { query: string }) => {
       const result = await searchKnowledge(query);
       return result || 'No specific information found for this query.';
     },
@@ -52,10 +47,10 @@ export const cheekiTools = {
 
   get_project_info: tool({
     description: 'Get basic CHEEKI project information like contract address, links, chain',
-    parameters: z.object({
+    inputSchema: z.object({
       field: z.enum(['contract', 'links', 'chain', 'name', 'all']),
     }),
-    execute: async ({ field }) => {
+    execute: async ({ field }: { field: string }) => {
       const k = knowledge.project;
       if (field === 'contract') return k.contractAddress;
       if (field === 'links') return JSON.stringify(k.officialLinks);
@@ -67,30 +62,19 @@ export const cheekiTools = {
 
   get_live_price: tool({
     description: 'Get real-time CHEEKI token price, market cap, trading volume, liquidity, and price changes from DexScreener. Use this whenever the user asks about price, chart, market cap, volume, or trading data.',
-    parameters: z.object({
+    inputSchema: z.object({
       field: z.enum(['all', 'price', 'volume', 'market_cap', 'changes', 'liquidity']).optional().default('all'),
     }),
-    execute: async ({ field }) => {
+    execute: async ({ field = 'all' }: { field?: string }) => {
       const data = await fetchCheekiPrice();
       if (!data) {
         return 'Could not fetch live price data. Try checking DexScreener directly: https://dexscreener.com/bsc/' + CHEEKI_CONTRACT;
       }
-
-      if (field === 'price') {
-        return `CHEEKI price: $${data.price_usd} USD (${data.price_native} BNB)\nChange 1h: ${data.price_change_1h}% | 24h: ${data.price_change_24h}%`;
-      }
-      if (field === 'volume') {
-        return `24h volume: $${Number(data.volume_24h).toLocaleString()}\nBuys: ${data.txns_24h_buys} | Sells: ${data.txns_24h_sells}`;
-      }
-      if (field === 'market_cap') {
-        return `Market cap: $${Number(data.market_cap).toLocaleString()}\nFDV: $${Number(data.fdv).toLocaleString()}`;
-      }
-      if (field === 'changes') {
-        return `Price changes:\n5m: ${data.price_change_5m}%\n1h: ${data.price_change_1h}%\n6h: ${data.price_change_6h}%\n24h: ${data.price_change_24h}%`;
-      }
-      if (field === 'liquidity') {
-        return `Liquidity: $${Number(data.liquidity_usd).toLocaleString()}`;
-      }
+      if (field === 'price') return `CHEEKI price: $${data.price_usd} USD (${data.price_native} BNB)\nChange 1h: ${data.price_change_1h}% | 24h: ${data.price_change_24h}%`;
+      if (field === 'volume') return `24h volume: $${Number(data.volume_24h).toLocaleString()}\nBuys: ${data.txns_24h_buys} | Sells: ${data.txns_24h_sells}`;
+      if (field === 'market_cap') return `Market cap: $${Number(data.market_cap).toLocaleString()}\nFDV: $${Number(data.fdv).toLocaleString()}`;
+      if (field === 'changes') return `Price changes:\n5m: ${data.price_change_5m}%\n1h: ${data.price_change_1h}%\n6h: ${data.price_change_6h}%\n24h: ${data.price_change_24h}%`;
+      if (field === 'liquidity') return `Liquidity: $${Number(data.liquidity_usd).toLocaleString()}`;
 
       return `CHEEKI Live Data (DexScreener):
 💰 Price: $${data.price_usd} (${data.price_native} BNB)
