@@ -1,7 +1,7 @@
-import { streamText } from 'ai';
+import { streamText, stepCountIs, convertToModelMessages } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { NextRequest } from 'next/server';
-import { createServerClient } from '@/lib/supabase/server';
+import { createClient as createServerClient } from '@/lib/supabase/server';
 import { buildSystemPrompt } from '@/lib/prompt';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { cheekiTools } from '@/lib/tools';
@@ -47,19 +47,26 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const { messages, chatId, lang = 'en' } = await req.json();
+  const { messages: uiMessages, chatId, lang = 'en' } = await req.json();
 
   const admin = createAdminClient();
 
+  // Convert UIMessages to model messages for ai v6
+  const messages = await convertToModelMessages(uiMessages);
+
   // Save user message (only for authenticated users with a chatId)
   if (user && chatId) {
-    const lastMessage = messages[messages.length - 1];
-    if (lastMessage?.role === 'user') {
-      await admin.from('messages').insert({
-        chat_id: chatId,
-        role: 'user',
-        content: lastMessage.content,
-      });
+    const lastUiMsg = uiMessages[uiMessages.length - 1];
+    if (lastUiMsg?.role === 'user') {
+      const textPart = (lastUiMsg.parts ?? []).find((p: { type: string }) => p.type === 'text');
+      const textContent = (textPart as { text?: string })?.text ?? '';
+      if (textContent) {
+        await admin.from('messages').insert({
+          chat_id: chatId,
+          role: 'user',
+          content: textContent,
+        });
+      }
     }
   }
 
@@ -70,7 +77,7 @@ export async function POST(req: NextRequest) {
     system: systemPrompt,
     messages,
     tools: cheekiTools,
-    maxSteps: 5,
+    stopWhen: stepCountIs(5),
     onFinish: async ({ text }) => {
       if (user && chatId && text) {
         await admin.from('messages').insert({
@@ -82,5 +89,5 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  return result.toDataStreamResponse();
+  return result.toTextStreamResponse();
 }
