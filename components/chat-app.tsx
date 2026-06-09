@@ -5,7 +5,8 @@ import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { User } from '@supabase/supabase-js';
-import { createBrowserClient } from '@/lib/supabase/client';
+import { TextStreamChatTransport, type UIMessage } from 'ai';
+import { createClient as createBrowserClient } from '@/lib/supabase/client';
 
 type Lang = 'en' | 'ru';
 type Chat = { id: string; title: string; created_at: string };
@@ -17,7 +18,6 @@ const T = {
     send: 'Send',
     signOut: 'Sign out',
     history: 'Chats',
-    thinking: 'Thinking...',
     welcome: 'Hello! I am CHEEKI AI — your assistant for everything about the CHEEKI project on BNB Chain.',
     welcomeSub: 'Ask me about price, how to buy, tokenomics, security, or anything else.',
     guest: 'Guest',
@@ -29,13 +29,21 @@ const T = {
     send: 'Отправить',
     signOut: 'Выйти',
     history: 'Чаты',
-    thinking: 'Думаю...',
     welcome: 'Привет! Я CHEEKI AI — твой ассистент по всему, что касается проекта CHEEKI в сети BNB Chain.',
     welcomeSub: 'Спрашивай о цене, как купить, токеномике, безопасности — всё что хочешь.',
     guest: 'Гость',
     quickActions: ['💰 Текущая цена?', '🛒 Как купить?', '🔒 Это безопасно?', '📊 Токеномика'],
   },
 };
+
+// Extract plain text from UIMessage parts (ai v6)
+function getMessageText(msg: UIMessage): string {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (msg.parts as any[])
+    .filter((p: any) => p.type === 'text')
+    .map((p: any) => String(p.text ?? ''))
+    .join('');
+}
 
 function MarkdownMessage({ content }: { content: string }) {
   return (
@@ -73,7 +81,6 @@ function MarkdownMessage({ content }: { content: string }) {
   );
 }
 
-// CHEEKI logo SVG
 function CheekiLogo({ size = 32 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -88,18 +95,24 @@ export function ChatApp({ user }: { user: User | null }) {
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const supabase = createBrowserClient();
   const t = T[lang];
   const isGuest = !user;
 
-  const { messages, input, handleInputChange, handleSubmit, isLoading, setMessages, setInput } = useChat({
-    api: '/api/chat',
-    body: { chatId: activeChatId, lang },
+  const { messages, sendMessage, status, setMessages } = useChat({
+    transport: new TextStreamChatTransport({
+      api: '/api/chat',
+      body: { chatId: activeChatId, lang },
+    }),
   });
+
+  const isLoading = status === 'streaming' || status === 'submitted';
 
   useEffect(() => {
     if (!isGuest) fetchChats();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -111,19 +124,20 @@ export function ChatApp({ user }: { user: User | null }) {
     if (res.ok) setChats(await res.json());
   };
 
-  const createChat = async () => {
-    if (isGuest) return;
+  const createChat = async (title?: string) => {
+    if (isGuest) return null;
     const res = await fetch('/api/chats', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: 'New Chat' }),
+      body: JSON.stringify({ title: title || 'New Chat' }),
     });
     if (res.ok) {
       const chat = await res.json();
       setActiveChatId(chat.id);
-      setMessages([]);
       setChats(prev => [chat, ...prev]);
+      return chat;
     }
+    return null;
   };
 
   const handleSignOut = async () => {
@@ -131,24 +145,21 @@ export function ChatApp({ user }: { user: User | null }) {
     window.location.href = '/login';
   };
 
-  const handleFormSubmit = async (e: React.FormEvent) => {
+  const handleSend = async (text?: string) => {
+    const msg = (text ?? input).trim();
+    if (!msg || isLoading) return;
+
     if (!isGuest && !activeChatId) {
-      const res = await fetch('/api/chats', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: input.slice(0, 40) || 'New Chat' }),
-      });
-      if (res.ok) {
-        const chat = await res.json();
-        setActiveChatId(chat.id);
-        setChats(prev => [chat, ...prev]);
-      }
+      await createChat(msg.slice(0, 40));
     }
-    handleSubmit(e);
+
+    setInput('');
+    sendMessage({ text: msg });
   };
 
-  const handleQuickAction = (action: string) => {
-    setInput(action.replace(/^[^\s]+\s/, ''));
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    handleSend();
   };
 
   return (
@@ -158,22 +169,18 @@ export function ChatApp({ user }: { user: User | null }) {
         sidebarOpen ? 'translate-x-0' : '-translate-x-full'
       } fixed md:relative md:translate-x-0 z-40 w-64 h-full bg-zinc-900 border-r border-zinc-800 flex flex-col transition-transform duration-200`}>
 
-        {/* Logo area */}
         <div className="p-4 border-b border-zinc-800 flex items-center gap-3">
-          <div className="animate-pulse-slow">
-            <CheekiLogo size={36} />
-          </div>
+          <div className="animate-pulse-slow"><CheekiLogo size={36} /></div>
           <div>
             <div className="text-yellow-400 font-bold text-lg leading-none">CHEEKI AI</div>
             <div className="text-xs text-gray-500 mt-0.5">{isGuest ? t.guest : user?.email}</div>
           </div>
         </div>
 
-        {/* New chat button */}
         {!isGuest && (
           <div className="p-3">
             <button
-              onClick={createChat}
+              onClick={() => { setMessages([]); setActiveChatId(null); }}
               className="w-full bg-yellow-500 hover:bg-yellow-400 active:scale-95 text-black font-bold py-2 px-4 rounded-lg text-sm transition-all duration-150"
             >
               + {t.newChat}
@@ -181,7 +188,6 @@ export function ChatApp({ user }: { user: User | null }) {
           </div>
         )}
 
-        {/* Chat history */}
         <div className="flex-1 overflow-y-auto px-2">
           {!isGuest && (
             <>
@@ -203,7 +209,6 @@ export function ChatApp({ user }: { user: User | null }) {
           )}
         </div>
 
-        {/* Bottom bar */}
         <div className="p-3 border-t border-zinc-800 flex items-center justify-between gap-2">
           <button
             onClick={() => setLang(lang === 'en' ? 'ru' : 'en')}
@@ -212,55 +217,29 @@ export function ChatApp({ user }: { user: User | null }) {
             {lang === 'en' ? '🇷🇺 RU' : '🇬🇧 EN'}
           </button>
           {isGuest ? (
-            <a href="/login" className="text-xs text-yellow-500 hover:text-yellow-300 transition font-medium">
-              Sign in →
-            </a>
+            <a href="/login" className="text-sm text-yellow-500 hover:text-yellow-300 transition font-medium">Sign in →</a>
           ) : (
-            <button onClick={handleSignOut} className="text-xs text-gray-500 hover:text-red-400 transition">
-              {t.signOut}
-            </button>
+            <button onClick={handleSignOut} className="text-xs text-gray-500 hover:text-red-400 transition">{t.signOut}</button>
           )}
         </div>
       </aside>
 
-      {/* Main chat area */}
+      {/* Main */}
       <div className="flex flex-col flex-1 min-w-0">
-
-        {/* Top bar */}
         <div className="flex items-center px-4 py-3 border-b border-zinc-800 gap-3">
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="md:hidden text-gray-400 hover:text-white"
-          >
+          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="md:hidden text-gray-400 hover:text-white">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M3 5h14a1 1 0 010 2H3a1 1 0 010-2zm0 4h14a1 1 0 010 2H3a1 1 0 010-2zm0 4h14a1 1 0 010 2H3a1 1 0 010-2z"/>
             </svg>
           </button>
-          <div className="hidden md:block">
-            <CheekiLogo size={28} />
-          </div>
+          <div className="hidden md:block"><CheekiLogo size={28} /></div>
           <span className="text-yellow-400 font-bold">CHEEKI AI</span>
-          <div className="ml-auto flex items-center gap-2">
-            <a
-              href="https://dexscreener.com/bsc/0x0c0A5B284D3bDD42c9FD53C99502CF8b3FD9f599"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-gray-500 hover:text-green-400 transition hidden sm:block"
-            >
-              📈 Chart
-            </a>
-            <a
-              href="https://t.me/CHEEKIofficial"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-gray-500 hover:text-blue-400 transition hidden sm:block"
-            >
-              💬 TG
-            </a>
+          <div className="ml-auto flex items-center gap-3">
+            <a href="https://dexscreener.com/bsc/0x0c0A5B284D3bDD42c9FD53C99502CF8b3FD9f599" target="_blank" rel="noopener noreferrer" className="text-xs text-gray-500 hover:text-green-400 transition hidden sm:block">📈 Chart</a>
+            <a href="https://t.me/CHEEKIofficial" target="_blank" rel="noopener noreferrer" className="text-xs text-gray-500 hover:text-blue-400 transition hidden sm:block">💬 TG</a>
           </div>
         </div>
 
-        {/* Messages */}
         <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full gap-6 text-center animate-fade-in">
@@ -273,12 +252,11 @@ export function ChatApp({ user }: { user: User | null }) {
                   <p className="text-gray-500 text-sm mt-1 max-w-sm">{t.welcomeSub}</p>
                 </div>
               </div>
-              {/* Quick action chips */}
               <div className="flex flex-wrap gap-2 justify-center max-w-md">
                 {t.quickActions.map((action) => (
                   <button
                     key={action}
-                    onClick={() => handleQuickAction(action)}
+                    onClick={() => handleSend(action.replace(/^[\p{Emoji}\s]+/u, '').trim())}
                     className="text-xs px-3 py-2 rounded-full border border-zinc-700 text-gray-400 hover:border-yellow-500 hover:text-yellow-400 transition-all duration-150 hover:scale-105"
                   >
                     {action}
@@ -288,37 +266,35 @@ export function ChatApp({ user }: { user: User | null }) {
             </div>
           )}
 
-          {messages.map((m, i) => (
-            <div
-              key={m.id}
-              className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-slide-in`}
-              style={{ animationDelay: `${i * 20}ms` }}
-            >
-              {m.role === 'assistant' && (
-                <div className="w-7 h-7 rounded-full bg-yellow-500/20 border border-yellow-500/40 flex items-center justify-center mr-2 mt-1 flex-shrink-0">
-                  <CheekiLogo size={20} />
-                </div>
-              )}
-              <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                m.role === 'user'
-                  ? 'bg-yellow-500 text-black font-medium'
-                  : 'bg-zinc-800 text-gray-100'
-              }`}>
-                {m.role === 'assistant' ? (
-                  <MarkdownMessage content={typeof m.content === 'string' ? m.content : JSON.stringify(m.content)} />
-                ) : (
-                  typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+          {messages.map((m, i) => {
+            const text = getMessageText(m);
+            if (!text) return null;
+            return (
+              <div
+                key={m.id}
+                className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-slide-in`}
+                style={{ animationDelay: `${i * 20}ms` }}
+              >
+                {m.role === 'assistant' && (
+                  <div className="w-7 h-7 rounded-full bg-yellow-500/20 border border-yellow-500/40 flex items-center justify-center mr-2 mt-1 flex-shrink-0">
+                    <CheekiLogo size={20} />
+                  </div>
                 )}
+                <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                  m.role === 'user' ? 'bg-yellow-500 text-black font-medium' : 'bg-zinc-800 text-gray-100'
+                }`}>
+                  {m.role === 'assistant' ? <MarkdownMessage content={text} /> : text}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           {isLoading && (
             <div className="flex justify-start">
               <div className="w-7 h-7 rounded-full bg-yellow-500/20 border border-yellow-500/40 flex items-center justify-center mr-2 mt-1 flex-shrink-0">
                 <CheekiLogo size={20} />
               </div>
-              <div className="bg-zinc-800 rounded-2xl px-4 py-3 text-sm text-gray-400">
+              <div className="bg-zinc-800 rounded-2xl px-4 py-3">
                 <span className="inline-flex gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-bounce" style={{ animationDelay: '0ms' }} />
                   <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -330,12 +306,12 @@ export function ChatApp({ user }: { user: User | null }) {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input */}
         <div className="border-t border-zinc-800 p-4">
           <form onSubmit={handleFormSubmit} className="flex gap-2">
             <input
               value={input}
-              onChange={handleInputChange}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
               placeholder={t.placeholder}
               disabled={isLoading}
               className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-yellow-500 focus:ring-1 focus:ring-yellow-500/30 transition-all disabled:opacity-50"
@@ -354,12 +330,8 @@ export function ChatApp({ user }: { user: User | null }) {
         </div>
       </div>
 
-      {/* Mobile overlay */}
       {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/60 z-30 md:hidden backdrop-blur-sm"
-          onClick={() => setSidebarOpen(false)}
-        />
+        <div className="fixed inset-0 bg-black/60 z-30 md:hidden backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
       )}
     </div>
   );
