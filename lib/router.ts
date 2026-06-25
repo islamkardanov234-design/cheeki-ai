@@ -53,6 +53,10 @@ const LONG_CONTEXT_PATTERNS =
 const QUICK_FACT_PATTERNS =
   /(price|how to buy|where to buy|chart|link|telegram|цена|как купить|где купить|график|ссылк|телеграм)/i;
 
+// Запросы на генерацию изображений — нужна модель с вызовом инструментов (generate_image работает через OpenAI)
+const IMAGE_PATTERNS =
+  /(draw|generate (an? )?image|create (an? )?image|make (a )?(meme|picture|logo|image)|picture of|нарисуй|сгенерируй|сгенери|сделай (мем|картинк|логотип|изображен)|картинку|изображение с)/i;
+
 export interface RouteDecision {
   id: ModelId;
   label: string;
@@ -63,6 +67,10 @@ export interface RouteDecision {
 
 /** Выбирает предпочтительный движок по тексту (без учёта наличия ключей) */
 function preferredModel(text: string): { id: ModelId; reason: string } {
+  // Генерация изображений идёт через OpenAI-инструмент — направляем на модель с надёжным tool-calling.
+  if (IMAGE_PATTERNS.test(text)) {
+    return { id: 'gpt-4o-mini', reason: 'image generation request' };
+  }
   if (TECHNICAL_PATTERNS.test(text)) {
     return { id: 'claude', reason: 'technical/security question' };
   }
