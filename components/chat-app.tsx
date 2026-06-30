@@ -18,10 +18,10 @@ const T = {
     send: 'Send',
     signOut: 'Sign out',
     history: 'Chats',
-    welcome: 'Hello! I am CHEEKI AI — your assistant for everything about the CHEEKI project on BNB Chain.',
-    welcomeSub: 'Ask me about price, how to buy, tokenomics, security, or anything else.',
+    welcome: 'Hello! I am CHEEKI AI — a universal assistant. CHEEKI expert, but I can help with anything.',
+    welcomeSub: 'Ask about CHEEKI, general questions, code, or ask me to generate an image.',
     guest: 'Guest',
-    quickActions: ['💰 Current price?', '🛒 How to buy?', '🔒 Is it safe?', '📊 Tokenomics'],
+    quickActions: ['💰 CHEEKI price?', '🛒 How to buy?', '🎨 Generate an image', '💻 Write some code'],
   },
   ru: {
     newChat: 'Новый чат',
@@ -29,10 +29,10 @@ const T = {
     send: 'Отправить',
     signOut: 'Выйти',
     history: 'Чаты',
-    welcome: 'Привет! Я CHEEKI AI — твой ассистент по всему, что касается проекта CHEEKI в сети BNB Chain.',
-    welcomeSub: 'Спрашивай о цене, как купить, токеномике, безопасности — всё что хочешь.',
+    welcome: 'Привет! Я CHEEKI AI — универсальный ассистент. Эксперт по CHEEKI, но помогу с чем угодно.',
+    welcomeSub: 'Спрашивай про CHEEKI, общие вопросы, код — или попроси сгенерировать картинку.',
     guest: 'Гость',
-    quickActions: ['💰 Текущая цена?', '🛒 Как купить?', '🔒 Это безопасно?', '📊 Токеномика'],
+    quickActions: ['💰 Цена CHEEKI?', '🛒 Как купить?', '🎨 Сгенерируй картинку', '💻 Напиши код'],
   },
 };
 
@@ -74,6 +74,18 @@ function MarkdownMessage({ content }: { content: string }) {
         h1: ({ children }) => <h1 className="text-base font-bold text-yellow-400 mb-1">{children}</h1>,
         h2: ({ children }) => <h2 className="text-sm font-bold text-yellow-300 mb-1">{children}</h2>,
         h3: ({ children }) => <h3 className="text-sm font-semibold text-yellow-200 mb-1">{children}</h3>,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any, jsx-a11y/alt-text
+        img: ({ src, alt }: any) => (
+          <a href={typeof src === 'string' ? src : '#'} target="_blank" rel="noopener noreferrer">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={typeof src === 'string' ? src : ''}
+              alt={alt || 'generated image'}
+              className="rounded-xl my-2 max-w-full border border-zinc-700"
+              loading="lazy"
+            />
+          </a>
+        ),
       }}
     >
       {content}

@@ -1,4 +1,4 @@
-import { createServerClient } from '@/lib/supabase/server';
+import { createClient as createServerClient } from '@/lib/supabase/server';
 import { ChatApp } from '@/components/chat-app';
 
 export default async function HomePage() {

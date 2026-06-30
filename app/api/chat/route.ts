@@ -1,11 +1,12 @@
 import { streamText, stepCountIs, convertToModelMessages } from 'ai';
-import { openai } from '@ai-sdk/openai';
 import { NextRequest } from 'next/server';
 import { createClient as createServerClient } from '@/lib/supabase/server';
 import { buildSystemPrompt } from '@/lib/prompt';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { cheekiTools } from '@/lib/tools';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { routeModel } from '@/lib/router';
+import type { ModelId } from '@/lib/models';
 import { headers } from 'next/headers';
 
 export const runtime = 'nodejs';
@@ -47,7 +48,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const { messages: uiMessages, chatId, lang = 'en' } = await req.json();
+  const { messages: uiMessages, chatId, lang = 'en', model: forcedModel = null } = await req.json();
 
   const admin = createAdminClient();
 
@@ -72,8 +73,26 @@ export async function POST(req: NextRequest) {
 
   const systemPrompt = buildSystemPrompt(lang as 'en' | 'ru');
 
+  // --- Выбор модели: ручной (forcedModel) или автоматический по тексту вопроса ---
+  const lastUserUiMsg = [...uiMessages].reverse().find((m: { role: string }) => m.role === 'user');
+  const lastUserText =
+    ((lastUserUiMsg?.parts ?? []).find((p: { type: string }) => p.type === 'text') as { text?: string })?.text ?? '';
+
+  let model;
+  try {
+    const routed = routeModel(lastUserText, forcedModel as ModelId | null);
+    model = routed.model;
+    // Лог для отладки роутинга (виден в логах Vercel)
+    console.log(`[router] -> ${routed.decision.id} (${routed.decision.reason})${routed.decision.fellBack ? ' [fallback]' : ''}`);
+  } catch (err) {
+    return new Response(
+      (err as Error).message ?? 'No AI provider configured.',
+      { status: 503 },
+    );
+  }
+
   const result = streamText({
-    model: openai('gpt-4o-mini'),
+    model,
     system: systemPrompt,
     messages,
     tools: cheekiTools,

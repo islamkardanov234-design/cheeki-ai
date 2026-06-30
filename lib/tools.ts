@@ -2,6 +2,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { searchKnowledge } from './knowledge-search';
 import { knowledge } from './knowledge';
+import { generateImage } from './image-gen';
 
 const CHEEKI_CONTRACT = '0x0c0A5B284D3bDD42c9FD53C99502CF8b3FD9f599';
 const DEXSCREENER_API = `https://api.dexscreener.com/latest/dex/tokens/${CHEEKI_CONTRACT}`;
@@ -85,6 +86,30 @@ export const cheekiTools = {
 🔄 Txns 24h: ${data.txns_24h_buys} buys / ${data.txns_24h_sells} sells
 📉 Changes: 5m ${data.price_change_5m}% | 1h ${data.price_change_1h}% | 6h ${data.price_change_6h}% | 24h ${data.price_change_24h}%
 🔗 Chart: ${data.chart_url}`;
+    },
+  }),
+
+  generate_image: tool({
+    description:
+      'Generate an image from a text description. Use this whenever the user asks to draw, create, generate, or make an image, picture, meme, logo, or art. Returns markdown that renders the image inline in the chat.',
+    inputSchema: z.object({
+      prompt: z
+        .string()
+        .describe('Detailed English description of the image to generate. Translate the user request to English if needed and add helpful visual detail.'),
+      size: z
+        .enum(['1024x1024', '1536x1024', '1024x1536'])
+        .optional()
+        .default('1024x1024')
+        .describe('Aspect ratio: square, landscape, or portrait.'),
+    }),
+    execute: async ({ prompt, size = '1024x1024' }: { prompt: string; size?: '1024x1024' | '1536x1024' | '1024x1536' }) => {
+      try {
+        const img = await generateImage(prompt, size);
+        // Возвращаем Markdown — фронтенд рендерит его как картинку.
+        return `✅ Image generated.\n\n![${prompt.slice(0, 80)}](${img.url})`;
+      } catch (e) {
+        return `⚠️ Could not generate the image: ${(e as Error).message}`;
+      }
     },
   }),
 };
